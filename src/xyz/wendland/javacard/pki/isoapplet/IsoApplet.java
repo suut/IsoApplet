@@ -208,7 +208,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
             }
         }
 
-        if((api_features & API_FEATURE_RSA_4096) > (byte)0) {
+        if(((api_features & API_FEATURE_RSA_4096) > (byte)0) && DEF_PRIVATE_KEY_IMPORT_ALLOWED) {
             // If supporting RSA 4096, we need more space for RSA import and decrypting etc.
             RAM_BUF_SIZE = 1500;
         } else {
