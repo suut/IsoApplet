@@ -140,7 +140,13 @@ public class IsoApplet extends Applet implements ExtendedLength {
     private byte[] ram_buf = null;
     private Cipher rsaPkcs1Cipher = null;
     private boolean usePrecomputedHashEcdsa = false;
-    private Signature ecdsaSignature = null;
+    private Signature ecdsaPreHashedSignature = null;
+    private Signature ecdsa16BSignature = null;
+    private Signature ecdsa20BSignature = null;
+    private Signature ecdsa28BSignature = null;
+    private Signature ecdsa32BSignature = null;
+    private Signature ecdsa48BSignature = null;
+    private Signature ecdsa64BSignature = null;
     private Signature rsaSha1PssSignature = null;
     private Signature rsaSha224PssSignature = null;
     private Signature rsaSha256PssSignature = null;
@@ -184,7 +190,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
 
         // API features: probe card support for ECDSA
         try {
-            ecdsaSignature = Signature.getInstance(MessageDigest.ALG_NULL, Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL, false);
+            ecdsaPreHashedSignature = Signature.getInstance(MessageDigest.ALG_NULL, Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL, false);
             usePrecomputedHashEcdsa = false;
             api_features |= API_FEATURE_ECC;
         } catch (CryptoException e) {
@@ -193,16 +199,23 @@ public class IsoApplet extends Applet implements ExtendedLength {
                  * We should not throw an exception in this cases
                  * as this would prevent installation, and we
                  * trying a different mechanism just after. */
-                ecdsaSignature = null;
+                ecdsaPreHashedSignature = null;
             } else {
                 throw e;
             }
         }
 
-        // If the regular SIG_CIPHER_ECDSA ALG_NULL is not available we attempt the one with fixed hash length
+        // If the regular SIG_CIPHER_ECDSA ALG_NULL is not available we attempt the ones with fixed hash length
         if ((api_features & API_FEATURE_ECC) == 0) {
-            // We test SHA-256 because it's available in the JCardEngine simulator but more might be available
-            if (testEcdsaDigestAlgo(MessageDigest.ALG_SHA_256)) {
+            ecdsa16BSignature = getEcdsaForDigestAlgo(MessageDigest.ALG_MD5);
+            ecdsa20BSignature = getEcdsaForDigestAlgo(MessageDigest.ALG_SHA);
+            ecdsa28BSignature = getEcdsaForDigestAlgo(MessageDigest.ALG_SHA_224);
+            ecdsa32BSignature = getEcdsaForDigestAlgo(MessageDigest.ALG_SHA_256);
+            ecdsa48BSignature = getEcdsaForDigestAlgo(MessageDigest.ALG_SHA_384);
+            ecdsa64BSignature = getEcdsaForDigestAlgo(MessageDigest.ALG_SHA_512);
+
+            if (ecdsa16BSignature != null || ecdsa20BSignature != null || ecdsa28BSignature != null ||
+                ecdsa32BSignature != null || ecdsa48BSignature != null || ecdsa64BSignature != null) {
                 api_features |= API_FEATURE_ECC;
                 usePrecomputedHashEcdsa = true;
             }
@@ -271,7 +284,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
             }
         }
 
-        requestObjectDeletion();
+        JCSystem.requestObjectDeletion();
 
         state = STATE_CREATION;
         register();
@@ -770,7 +783,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[privKeyRef].clearKey();
             }
             keys[privKeyRef] = kp.getPrivate();
-            requestObjectDeletion();
+            JCSystem.requestObjectDeletion();
 
             // Return pubkey. See ISO7816-8 table 3.
             try {
@@ -841,7 +854,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[privKeyRef].clearKey();
             }
             keys[privKeyRef] = privKey;
-            requestObjectDeletion();
+            JCSystem.requestObjectDeletion();
 
             // Return pubkey. See ISO7816-8 table 3.
             try {
@@ -858,30 +871,46 @@ public class IsoApplet extends Applet implements ExtendedLength {
         }
     }
 
-    /**
-     * \brief Request object deletion
-     */
-    private static void requestObjectDeletion() {
-        if(JCSystem.isObjectDeletionSupported()) {
-            JCSystem.requestObjectDeletion();
-        }
-    }
-
-    private static boolean testEcdsaDigestAlgo(byte algo) {
-        Signature sig = null;
+    private static Signature getEcdsaForDigestAlgo(byte algo) {
         try {
-            sig = Signature.getInstance(algo, Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL, false);
-            return true;
+            return Signature.getInstance(algo, Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL, false);
         } catch (CryptoException e) {
             if (e.getReason() == CryptoException.NO_SUCH_ALGORITHM) {
-                return false;
+                return null;
             } else {
                 throw e;
             }
-        } finally {
-            sig = null;
-            requestObjectDeletion();
         }
+    }
+
+    private Signature getSignatureByLength(short length) throws ISOException, CryptoException {
+       Signature sig = null;
+       switch (length) {
+       case MessageDigest.LENGTH_MD5:
+           sig = ecdsa16BSignature;
+           break;
+       case MessageDigest.LENGTH_SHA:
+           sig = ecdsa20BSignature;
+           break;
+       case MessageDigest.LENGTH_SHA_224:
+           sig = ecdsa28BSignature;
+           break;
+       case MessageDigest.LENGTH_SHA_256:
+           sig = ecdsa32BSignature;
+           break;
+       case MessageDigest.LENGTH_SHA_384:
+           sig = ecdsa48BSignature;
+           break;
+       case MessageDigest.LENGTH_SHA_512:
+           sig = ecdsa64BSignature;
+           break;
+       default:
+           ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+       }
+       if (sig == null) {
+           CryptoException.throwIt(CryptoException.NO_SUCH_ALGORITHM);
+       }
+       return sig;
     }
 
     private static byte getMessageDigestAlgoByLength(short length) throws ISOException {
@@ -1401,32 +1430,19 @@ public class IsoApplet extends Applet implements ExtendedLength {
             ECPrivateKey ecKey = (ECPrivateKey) keys[currentPrivateKeyRef[0]];
 
             Signature sig = null;
-            try {
-                if (usePrecomputedHashEcdsa) {
-                    try {
-                        sig = Signature.getInstance(getMessageDigestAlgoByLength(lc), Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL, false);
-                    } catch (CryptoException e) {
-                        if (e.getReason() == CryptoException.NO_SUCH_ALGORITHM) {
-                            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
-                        } else {
-                            throw e;
-                        }
-                    }
-                } else {
-                    sig = ecdsaSignature;
-                }
-
-                sig.init(ecKey, Signature.MODE_SIGN);
-                if (usePrecomputedHashEcdsa) {
-                    sigLen = sig.signPreComputedHash(ram_buf, (short)0, lc, apdu.getBuffer(), (short)0);
-                } else {
-                    sigLen = sig.sign(ram_buf, (short)0, lc, apdu.getBuffer(), (short)0);
-                }
-                apdu.setOutgoingAndSend((short) 0, sigLen);
-            } finally {
-                sig = null;
-                requestObjectDeletion();
+            if (usePrecomputedHashEcdsa) {
+                sig = getSignatureByLength(lc);
+            } else {
+                sig = ecdsaPreHashedSignature;
             }
+
+            sig.init(ecKey, Signature.MODE_SIGN);
+            if (usePrecomputedHashEcdsa) {
+                sigLen = sig.signPreComputedHash(ram_buf, (short)0, lc, apdu.getBuffer(), (short)0);
+            } else {
+                sigLen = sig.sign(ram_buf, (short)0, lc, apdu.getBuffer(), (short)0);
+            }
+            apdu.setOutgoingAndSend((short) 0, sigLen);
             break;
 
         default:
@@ -1650,7 +1666,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[currentPrivateKeyRef[0]].clearKey();
             }
             keys[currentPrivateKeyRef[0]] = rsaPrKey;
-            requestObjectDeletion();
+            JCSystem.requestObjectDeletion();
             JCSystem.commitTransaction();
         } else {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
@@ -1761,7 +1777,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[currentPrivateKeyRef[0]].clearKey();
             }
             keys[currentPrivateKeyRef[0]] = ecPrKey;
-            requestObjectDeletion();
+            JCSystem.requestObjectDeletion();
             JCSystem.commitTransaction();
         } else {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
