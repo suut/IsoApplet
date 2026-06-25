@@ -127,7 +127,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
        We have to use the ram buffer for outgoing and incoming data larger than 133 bytes,
        unless the data is directly read from or written to the file system.
     */
-    private static final short RAM_BUF_SIZE = (short) 660;
+    private final short RAM_BUF_SIZE;
 
     /* Member variables: */
     private byte state;
@@ -168,10 +168,13 @@ public class IsoApplet extends Applet implements ExtendedLength {
      * \brief Only this class's install method should create the applet object.
      */
     protected IsoApplet() {
+        if( ! JCSystem.isObjectDeletionSupported()) {
+            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+        }
+
         api_features = API_FEATURE_EXT_APDU;
         pin = new OwnerPIN(PIN_MAX_TRIES, PIN_MAX_LENGTH);
         fs = new IsoFileSystem();
-        ram_buf = JCSystem.makeTransientByteArray(RAM_BUF_SIZE, JCSystem.CLEAR_ON_DESELECT);
 
         currentAlgorithmRef = JCSystem.makeTransientByteArray((short)1, JCSystem.CLEAR_ON_DESELECT);
         currentPrivateKeyRef = JCSystem.makeTransientShortArray((short)1, JCSystem.CLEAR_ON_DESELECT);
@@ -220,6 +223,15 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 throw e;
             }
         }
+
+        if(((api_features & API_FEATURE_RSA_4096) > (byte)0) && DEF_PRIVATE_KEY_IMPORT_ALLOWED) {
+            // If supporting RSA 4096, we need more space for RSA import and decrypting etc.
+            RAM_BUF_SIZE = 1500;
+        } else {
+            RAM_BUF_SIZE = 660;
+        }
+
+        ram_buf = JCSystem.makeTransientByteArray(RAM_BUF_SIZE, JCSystem.CLEAR_ON_DESELECT);
 
         /* API features: probe card support for RSA and PSS padding with SHA-1 and all SHA-2 algorithms
          * to be used with Signature.signPreComputedHash() */
