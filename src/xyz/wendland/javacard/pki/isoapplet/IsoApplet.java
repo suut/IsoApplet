@@ -22,7 +22,6 @@ package xyz.wendland.javacard.pki.isoapplet;
 import javacard.framework.Applet;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
-import javacard.framework.TransactionException;
 import javacard.framework.APDU;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
@@ -229,10 +228,6 @@ public class IsoApplet extends Applet implements ExtendedLength {
             testKey = null;
         } catch (CryptoException e) {
             if(e.getReason() != CryptoException.NO_SUCH_ALGORITHM) {
-                throw e;
-            }
-        } catch (TransactionException e) { // some NXP JCOP cards do throw this exception instead of CryptoException
-            if(e.getReason() != TransactionException.INTERNAL_FAILURE) {
                 throw e;
             }
         }
